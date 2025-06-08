@@ -1,0 +1,1306 @@
+
+# import streamlit as st
+# import pandas as pd
+# from pptx import Presentation
+# from pptx.util import Inches, Pt
+# from pptx.enum.text import PP_ALIGN
+# from pptx.dml.color import RGBColor
+# import io
+# import re
+# from PIL import Image
+# import tempfile
+# import os
+
+# def detect_placeholders(prs):
+#     """Detect all placeholders in the PowerPoint presentation"""
+#     placeholders = {
+#         'text': set(),
+#         'image': set(), 
+#         'table': set()
+#     }
+    
+#     # Regex pattern to find placeholders
+#     pattern = r'\{\{([^}]+)\}\}'
+    
+#     for slide in prs.slides:
+#         for shape in slide.shapes:
+#             # Check text in shapes
+#             if hasattr(shape, "text") and shape.text:
+#                 matches = re.findall(pattern, shape.text)
+#                 for match in matches:
+#                     placeholder = match.upper().strip()
+#                     if placeholder.startswith('IMAGE'):
+#                         placeholders['image'].add(placeholder)
+#                     elif placeholder.startswith('TABLE'):
+#                         placeholders['table'].add(placeholder)
+#                     else:
+#                         placeholders['text'].add(placeholder)
+            
+#             # Check text in table cells
+#             if shape.has_table:
+#                 table = shape.table
+#                 for row in table.rows:
+#                     for cell in row.cells:
+#                         if cell.text:
+#                             matches = re.findall(pattern, cell.text)
+#                             for match in matches:
+#                                 placeholder = match.upper().strip()
+#                                 if placeholder.startswith('IMAGE'):
+#                                     placeholders['image'].add(placeholder)
+#                                 elif placeholder.startswith('TABLE'):
+#                                     placeholders['table'].add(placeholder)
+#                                 else:
+#                                     placeholders['text'].add(placeholder)
+    
+#     return placeholders
+
+# def replace_text_in_slides(prs, replacements):
+#     """Replace placeholder text in all slides"""
+#     for slide in prs.slides:
+#         for shape in slide.shapes:
+#             if hasattr(shape, "text"):
+#                 for placeholder, replacement in replacements.items():
+#                     if placeholder in shape.text:
+#                         shape.text = shape.text.replace(placeholder, str(replacement))
+            
+#             # Handle text in tables
+#             if shape.has_table:
+#                 table = shape.table
+#                 for row in table.rows:
+#                     for cell in row.cells:
+#                         for placeholder, replacement in replacements.items():
+#                             if placeholder in cell.text:
+#                                 cell.text = cell.text.replace(placeholder, str(replacement))
+
+# def add_image_to_slide(slide, image_file, placeholder_text, width=Inches(4), height=Inches(3)):
+#     """Add image to slide, replacing placeholder or adding new"""
+#     # Reset file pointer and read data
+#     image_file.seek(0)
+#     image_data = image_file.read()
+    
+#     # Save uploaded image to temporary file
+#     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+#         tmp_file.write(image_data)
+#         tmp_path = tmp_file.name
+    
+#     try:
+#         # Look for placeholder text in shapes
+#         placeholder_found = False
+#         for shape in slide.shapes:
+#             if hasattr(shape, "text") and placeholder_text in shape.text:
+#                 # Get position and size of placeholder
+#                 left = shape.left
+#                 top = shape.top
+#                 width = shape.width
+#                 height = shape.height
+                
+#                 # Remove placeholder shape
+#                 shape.element.getparent().remove(shape.element)
+                
+#                 # Add image at same position
+#                 slide.shapes.add_picture(tmp_path, left, top, width, height)
+#                 placeholder_found = True
+#                 break
+        
+#         # If no placeholder found, add image at default position
+#         if not placeholder_found:
+#             slide.shapes.add_picture(tmp_path, Inches(1), Inches(1), width, height)
+            
+#     finally:
+#         # Clean up temporary file
+#         if os.path.exists(tmp_path):
+#             os.unlink(tmp_path)
+
+# def add_table_to_slide(slide, df, placeholder_text):
+#     """Add DataFrame as table to slide"""
+#     # Look for placeholder
+#     placeholder_shape = None
+#     for shape in slide.shapes:
+#         if hasattr(shape, "text") and placeholder_text in shape.text:
+#             placeholder_shape = shape
+#             break
+    
+#     if placeholder_shape:
+#         # Get position of placeholder
+#         left = placeholder_shape.left
+#         top = placeholder_shape.top
+#         width = placeholder_shape.width
+        
+#         # Remove placeholder
+#         placeholder_shape.element.getparent().remove(placeholder_shape.element)
+#     else:
+#         # Default position
+#         left = Inches(1)
+#         top = Inches(4)
+#         width = Inches(8)
+    
+#     # Create table
+#     rows, cols = df.shape[0] + 1, df.shape[1]  # +1 for header
+#     table_shape = slide.shapes.add_table(rows, cols, left, top, width, Inches(0.5 * rows))
+#     table = table_shape.table
+    
+#     # Add headers
+#     for i, col_name in enumerate(df.columns):
+#         cell = table.cell(0, i)
+#         cell.text = str(col_name)
+#         # Make header bold
+#         for paragraph in cell.text_frame.paragraphs:
+#             for run in paragraph.runs:
+#                 run.font.bold = True
+    
+#     # Add data
+#     for i, row in df.iterrows():
+#         for j, value in enumerate(row):
+#             cell = table.cell(i + 1, j)
+#             cell.text = str(value)
+
+# def main():
+#     st.set_page_config(
+#         page_title="Excel to PowerPoint Template Filler",
+#         page_icon="📊",
+#         layout="wide"
+#     )
+    
+#     st.title("📊 Excel to PowerPoint Template Filler")
+#     st.markdown("""
+#     **Transform your Excel data into PowerPoint presentations automatically!**
+    
+#     This app lets you:
+#     - 📊 Upload Excel files and select specific data
+#     - 🎯 Create automated sequences for text and tables  
+#     - 📄 Upload PowerPoint templates with placeholders
+#     - 🚀 Generate populated presentations instantly
+#     """)
+    
+#     # Initialize session state
+#     if 'excel_data' not in st.session_state:
+#         st.session_state.excel_data = {}
+#     if 'text_sequences' not in st.session_state:
+#         st.session_state.text_sequences = []
+#     if 'table_sequences' not in st.session_state:
+#         st.session_state.table_sequences = []
+    
+#     # Step 1: Excel File Upload and Configuration
+#     st.header("📋 Step 1: Upload & Configure Excel Data")
+    
+#     # Prominent call-to-action for Excel upload
+#     st.markdown("### 🔥 Start Here: Upload Your Excel File")
+#     st.markdown("*Upload your Excel file to unlock automatic data population features*")
+    
+#     uploaded_excel = st.file_uploader(
+#         "Choose Excel File (.xlsx, .xls)",
+#         type=['xlsx', 'xls'],
+#         help="Upload an Excel file to extract data for PowerPoint placeholders",
+#         key="excel_uploader"
+#     )
+    
+#     if uploaded_excel is not None:
+#         try:
+#             # Load Excel file
+#             excel_file = pd.ExcelFile(uploaded_excel)
+#             sheet_names = excel_file.sheet_names
+            
+#             st.success(f"🎉 **Excel file loaded successfully!**")
+#             st.info(f"📊 Found **{len(sheet_names)} sheets**: {', '.join(sheet_names)}")
+            
+#             # Sheet selection with better visibility
+#             st.markdown("### 📑 Select Sheets to Work With")
+#             selected_sheets = st.multiselect(
+#                 "Choose which sheets contain the data you want to use:",
+#                 sheet_names,
+#                 default=sheet_names[:3] if len(sheet_names) >= 3 else sheet_names,
+#                 help="Select one or more sheets that contain your data"
+#             )
+            
+#             if selected_sheets:
+#                 # Load data from selected sheets
+#                 for sheet_name in selected_sheets:
+#                     if sheet_name not in st.session_state.excel_data:
+#                         st.session_state.excel_data[sheet_name] = pd.read_excel(uploaded_excel, sheet_name=sheet_name)
+                
+#                 # Data configuration interface
+#                 st.subheader("🔧 Configure Data Sequences")
+#                 st.markdown("Create sequences that will automatically populate your PowerPoint placeholders")
+                
+#                 tab1, tab2 = st.tabs(["📝 Text Sequences", "📊 Table Sequences"])
+                
+#                 with tab1:
+#                     st.markdown("**Text sequences will populate text placeholders ({{TEXT1}}, {{TEXT2}}, etc.) in order**")
+                    
+#                     # Add new text sequence
+#                     with st.expander("➕ Add New Text Sequence"):
+#                         col1, col2, col3 = st.columns(3)
+#                         with col1:
+#                             text_sheet = st.selectbox("Select Sheet", selected_sheets, key="text_sheet")
+#                         with col2:
+#                             if text_sheet:
+#                                 available_columns = list(st.session_state.excel_data[text_sheet].columns)
+#                                 text_column = st.selectbox("Select Column", available_columns, key="text_column")
+#                         with col3:
+#                             text_row = st.number_input("Row Index (0-based)", min_value=0, 
+#                                                      max_value=len(st.session_state.excel_data[text_sheet])-1 if text_sheet else 0,
+#                                                      value=0, key="text_row")
+                        
+#                         if st.button("Add Text Sequence", key="add_text"):
+#                             if text_sheet and text_column:
+#                                 value = st.session_state.excel_data[text_sheet].iloc[text_row][text_column]
+#                                 sequence_info = {
+#                                     'sheet': text_sheet,
+#                                     'column': text_column,
+#                                     'row': text_row,
+#                                     'value': str(value),
+#                                     'description': f"{text_sheet} - {text_column} [Row {text_row}]"
+#                                 }
+#                                 st.session_state.text_sequences.append(sequence_info)
+#                                 st.success(f"Added text sequence: {sequence_info['description']}")
+#                                 st.rerun()
+                    
+#                     # Display and manage existing text sequences
+#                     if st.session_state.text_sequences:
+#                         st.markdown("**Current Text Sequences:**")
+#                         for i, seq in enumerate(st.session_state.text_sequences):
+#                             col1, col2, col3 = st.columns([3, 1, 1])
+#                             with col1:
+#                                 st.write(f"**{{{{TEXT{i+1}}}}}** ← {seq['description']}: `{seq['value'][:50]}{'...' if len(seq['value']) > 50 else ''}`")
+#                             with col2:
+#                                 if st.button("↑", key=f"up_text_{i}", disabled=i==0):
+#                                     st.session_state.text_sequences[i], st.session_state.text_sequences[i-1] = st.session_state.text_sequences[i-1], st.session_state.text_sequences[i]
+#                                     st.rerun()
+#                             with col3:
+#                                 if st.button("🗑️", key=f"del_text_{i}"):
+#                                     st.session_state.text_sequences.pop(i)
+#                                     st.rerun()
+                
+#                 with tab2:
+#                     st.markdown("**Table sequences will populate table placeholders ({{TABLE1}}, {{TABLE2}}, etc.) in order**")
+                    
+#                     # Add new table sequence
+#                     with st.expander("➕ Add New Table Sequence"):
+#                         col1, col2 = st.columns(2)
+#                         with col1:
+#                             table_sheet = st.selectbox("Select Sheet", selected_sheets, key="table_sheet")
+#                         with col2:
+#                             if table_sheet:
+#                                 available_columns = list(st.session_state.excel_data[table_sheet].columns)
+#                                 table_columns = st.multiselect(
+#                                     "Select Columns", 
+#                                     available_columns, 
+#                                     key="table_columns",
+#                                     help="Select multiple columns to create a table"
+#                                 )
+                        
+#                         table_rows = st.slider(
+#                             "Number of rows to include", 
+#                             min_value=1, 
+#                             max_value=len(st.session_state.excel_data[table_sheet]) if table_sheet else 10,
+#                             value=min(10, len(st.session_state.excel_data[table_sheet]) if table_sheet else 10),
+#                             key="table_rows"
+#                         )
+                        
+#                         if st.button("Add Table Sequence", key="add_table"):
+#                             if table_sheet and table_columns:
+#                                 df_subset = st.session_state.excel_data[table_sheet][table_columns].head(table_rows)
+#                                 sequence_info = {
+#                                     'sheet': table_sheet,
+#                                     'columns': table_columns,
+#                                     'rows': table_rows,
+#                                     'data': df_subset,
+#                                     'description': f"{table_sheet} - {', '.join(table_columns)} ({table_rows} rows)"
+#                                 }
+#                                 st.session_state.table_sequences.append(sequence_info)
+#                                 st.success(f"Added table sequence: {sequence_info['description']}")
+#                                 st.rerun()
+                    
+#                     # Display and manage existing table sequences
+#                     if st.session_state.table_sequences:
+#                         st.markdown("**Current Table Sequences:**")
+#                         for i, seq in enumerate(st.session_state.table_sequences):
+#                             with st.expander(f"**{{{{TABLE{i+1}}}}}** ← {seq['description']}"):
+#                                 col1, col2 = st.columns([4, 1])
+#                                 with col1:
+#                                     st.dataframe(seq['data'], use_container_width=True)
+#                                 with col2:
+#                                     if st.button("↑", key=f"up_table_{i}", disabled=i==0):
+#                                         st.session_state.table_sequences[i], st.session_state.table_sequences[i-1] = st.session_state.table_sequences[i-1], st.session_state.table_sequences[i]
+#                                         st.rerun()
+#                                     if st.button("🗑️", key=f"del_table_{i}"):
+#                                         st.session_state.table_sequences.pop(i)
+#                                         st.rerun()
+        
+#         except Exception as e:
+#             st.error(f"❌ Error loading Excel file: {str(e)}")
+#             st.error("Please make sure you uploaded a valid Excel file (.xlsx or .xls)")
+    
+#     else:
+#         # Show prominent message when no Excel file is uploaded
+#         st.warning("⬆️ **Please upload an Excel file above to enable auto-population features**")
+        
+#         with st.expander("💡 What happens when you upload Excel?", expanded=True):
+#             st.markdown("""
+#             **When you upload an Excel file, you'll be able to:**
+#             - 📊 **View all sheets** in your Excel file
+#             - 🎯 **Create text sequences** from individual cells (populates {{TEXT1}}, {{TEXT2}}, etc.)
+#             - 📋 **Create table sequences** from column groups (populates {{TABLE1}}, {{TABLE2}}, etc.)
+#             - 🔄 **Reorder sequences** to control the mapping
+#             - 🚀 **Auto-populate** your PowerPoint templates instantly
+            
+#             **Without Excel:** You can still use manual input mode below ⬇️
+#             """)
+        
+#         st.markdown("---")
+    
+#     # Step 2: PowerPoint Template Processing
+#     st.header("📄 Step 2: PowerPoint Template Processing")
+#     st.markdown("**Upload your PowerPoint template to populate with Excel data or manual inputs**")
+    
+#     uploaded_ppt = st.file_uploader(
+#         "📁 Upload PowerPoint Template (.pptx)",
+#         type=['pptx'],
+#         help="Upload a PowerPoint file with placeholder text like {{TEXT1}}, {{IMAGE1}}, {{TABLE1}}",
+#         key="ppt_uploader"
+#     )
+    
+#     if uploaded_ppt is not None:
+#         try:
+#             # Load and analyze the PowerPoint file
+#             prs = Presentation(uploaded_ppt)
+#             placeholders = detect_placeholders(prs)
+            
+#             st.success(f"✅ Template loaded! Found {len(placeholders['text'])} text, {len(placeholders['image'])} image, and {len(placeholders['table'])} table placeholders.")
+            
+#             # Show detected placeholders
+#             with st.expander("🔍 Detected Placeholders"):
+#                 col1, col2, col3 = st.columns(3)
+#                 with col1:
+#                     st.write("**Text Placeholders:**")
+#                     for placeholder in sorted(placeholders['text']):
+#                         st.write(f"• {{{{{placeholder}}}}}")
+#                 with col2:
+#                     st.write("**Image Placeholders:**")
+#                     for placeholder in sorted(placeholders['image']):
+#                         st.write(f"• {{{{{placeholder}}}}}")
+#                 with col3:
+#                     st.write("**Table Placeholders:**")
+#                     for placeholder in sorted(placeholders['table']):
+#                         st.write(f"• {{{{{placeholder}}}}}")
+            
+#             # Show mapping preview
+#             if st.session_state.text_sequences or st.session_state.table_sequences:
+#                 st.success("🎯 **Auto-population is ACTIVE!** Your Excel data will automatically fill placeholders.")
+#                 with st.expander("🔗 Auto-Population Mapping Preview", expanded=True):
+#                     col1, col2 = st.columns(2)
+                    
+#                     with col1:
+#                         st.write("**Text Mapping:**")
+#                         for i, seq in enumerate(st.session_state.text_sequences):
+#                             placeholder_name = f"TEXT{i+1}"
+#                             if placeholder_name in [p for p in placeholders['text']]:
+#                                 st.write(f"✅ {{{{{placeholder_name}}}}} ← {seq['description']}")
+#                             else:
+#                                 st.write(f"⚠️ {{{{{placeholder_name}}}}} ← {seq['description']} (placeholder not found)")
+                    
+#                     with col2:
+#                         st.write("**Table Mapping:**")
+#                         for i, seq in enumerate(st.session_state.table_sequences):
+#                             placeholder_name = f"TABLE{i+1}"
+#                             if placeholder_name in [p for p in placeholders['table']]:
+#                                 st.write(f"✅ {{{{{placeholder_name}}}}} ← {seq['description']}")
+#                             else:
+#                                 st.write(f"⚠️ {{{{{placeholder_name}}}}} ← {seq['description']} (placeholder not found)")
+            
+#             # Manual inputs for remaining placeholders
+#             remaining_text_placeholders = [p for p in placeholders['text'] if not any(f"TEXT{i+1}" == p for i in range(len(st.session_state.text_sequences)))]
+#             remaining_table_placeholders = [p for p in placeholders['table'] if not any(f"TABLE{i+1}" == p for i in range(len(st.session_state.table_sequences)))]
+            
+#             if remaining_text_placeholders or remaining_table_placeholders or placeholders['image']:
+#                 st.subheader("✍️ Manual Inputs for Remaining Placeholders")
+                
+#                 col1, col2 = st.columns(2)
+                
+#                 with col1:
+#                     # Remaining text inputs
+#                     if remaining_text_placeholders:
+#                         st.write("**Additional Text Inputs:**")
+#                         manual_text_inputs = {}
+#                         for placeholder in sorted(remaining_text_placeholders):
+#                             placeholder_key = f"{{{{{placeholder}}}}}"
+#                             manual_text_inputs[placeholder_key] = st.text_area(
+#                                 f"{placeholder} (replaces {placeholder_key})",
+#                                 height=80,
+#                                 key=f"manual_text_{placeholder}"
+#                             )
+                    
+#                     # Image inputs
+#                     if placeholders['image']:
+#                         st.write("**Image Uploads:**")
+#                         uploaded_images = {}
+#                         for placeholder in sorted(placeholders['image']):
+#                             placeholder_key = f"{{{{{placeholder}}}}}"
+#                             uploaded_images[placeholder] = st.file_uploader(
+#                                 f"{placeholder} (replaces {placeholder_key})",
+#                                 type=['png', 'jpg', 'jpeg'],
+#                                 key=f"image_{placeholder}"
+#                             )
+                            
+#                             if uploaded_images[placeholder] is not None:
+#                                 img = Image.open(uploaded_images[placeholder])
+#                                 st.image(img, caption=f"Preview of {placeholder}", width=200)
+                
+#                 with col2:
+#                     # Remaining table inputs
+#                     if remaining_table_placeholders:
+#                         st.write("**Additional Table Inputs:**")
+#                         manual_tables_data = {}
+#                         for placeholder in sorted(remaining_table_placeholders):
+#                             placeholder_key = f"{{{{{placeholder}}}}}"
+#                             st.write(f"**{placeholder} (replaces {placeholder_key})**")
+                            
+#                             # Default sample data
+#                             if f"manual_df_{placeholder}" not in st.session_state:
+#                                 st.session_state[f"manual_df_{placeholder}"] = pd.DataFrame({
+#                                     'Column 1': ['Row 1', 'Row 2', 'Row 3'],
+#                                     'Column 2': [100, 200, 300]
+#                                 })
+                            
+#                             manual_tables_data[placeholder] = st.data_editor(
+#                                 st.session_state[f"manual_df_{placeholder}"],
+#                                 key=f"manual_table_{placeholder}",
+#                                 num_rows="dynamic",
+#                                 use_container_width=True
+#                             )
+            
+#             # Generate PowerPoint button
+#             generation_label = "🚀 Generate PowerPoint with Auto-Population" if (st.session_state.text_sequences or st.session_state.table_sequences) else "🚀 Generate PowerPoint (Manual Mode)"
+            
+#             if st.button(generation_label, type="primary", use_container_width=True):
+#                 try:
+#                     # Reload the PowerPoint file
+#                     prs = Presentation(uploaded_ppt)
+                    
+#                     # Auto-populate text placeholders from sequences
+#                     text_replacements = {}
+#                     for i, seq in enumerate(st.session_state.text_sequences):
+#                         placeholder_key = f"{{{{TEXT{i+1}}}}}"
+#                         text_replacements[placeholder_key] = seq['value']
+                    
+#                     # Add manual text inputs
+#                     if remaining_text_placeholders:
+#                         for placeholder in remaining_text_placeholders:
+#                             placeholder_key = f"{{{{{placeholder}}}}}"
+#                             if placeholder_key in manual_text_inputs and manual_text_inputs[placeholder_key].strip():
+#                                 text_replacements[placeholder_key] = manual_text_inputs[placeholder_key]
+                    
+#                     # Replace text placeholders
+#                     if text_replacements:
+#                         replace_text_in_slides(prs, text_replacements)
+#                         st.success(f"✅ Replaced {len(text_replacements)} text placeholders")
+                    
+#                     # Auto-populate table placeholders from sequences
+#                     table_count = 0
+#                     for i, seq in enumerate(st.session_state.table_sequences):
+#                         placeholder_key = f"{{{{TABLE{i+1}}}}}"
+#                         # Find which slide contains this placeholder
+#                         for slide in prs.slides:
+#                             for shape in slide.shapes:
+#                                 if hasattr(shape, "text") and placeholder_key in shape.text:
+#                                     add_table_to_slide(slide, seq['data'], placeholder_key)
+#                                     table_count += 1
+#                                     break
+                    
+#                     # Add manual tables
+#                     if remaining_table_placeholders:
+#                         for placeholder in remaining_table_placeholders:
+#                             if placeholder in manual_tables_data and not manual_tables_data[placeholder].empty:
+#                                 placeholder_key = f"{{{{{placeholder}}}}}"
+#                                 for slide in prs.slides:
+#                                     for shape in slide.shapes:
+#                                         if hasattr(shape, "text") and placeholder_key in shape.text:
+#                                             add_table_to_slide(slide, manual_tables_data[placeholder], placeholder_key)
+#                                             table_count += 1
+#                                             break
+                    
+#                     if table_count > 0:
+#                         st.success(f"✅ Added {table_count} tables")
+                    
+#                     # Add images
+#                     if placeholders['image']:
+#                         image_count = 0
+#                         for placeholder in placeholders['image']:
+#                             if uploaded_images[placeholder] is not None:
+#                                 placeholder_key = f"{{{{{placeholder}}}}}"
+#                                 for slide in prs.slides:
+#                                     for shape in slide.shapes:
+#                                         if hasattr(shape, "text") and placeholder_key in shape.text:
+#                                             add_image_to_slide(slide, uploaded_images[placeholder], placeholder_key)
+#                                             image_count += 1
+#                                             break
+                        
+#                         if image_count > 0:
+#                             st.success(f"✅ Added {image_count} images")
+                    
+#                     # Save the modified presentation
+#                     output = io.BytesIO()
+#                     prs.save(output)
+#                     output.seek(0)
+                    
+#                     # Download button
+#                     st.download_button(
+#                         label="📥 Download Auto-Populated PowerPoint",
+#                         data=output,
+#                         file_name="auto_populated_presentation.pptx",
+#                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+#                         use_container_width=True
+#                     )
+                    
+#                     st.success("🎉 PowerPoint generated successfully with auto-population!")
+                    
+#                 except Exception as e:
+#                     st.error(f"❌ Error processing PowerPoint: {str(e)}")
+#                     st.error("Make sure your PowerPoint file is valid and contains the expected placeholders.")
+        
+#         except Exception as e:
+#             st.error(f"❌ Error loading PowerPoint: {str(e)}")
+#             st.error("Please make sure you uploaded a valid .pptx file.")
+    
+#     else:
+#         st.info("👆 Please upload a PowerPoint template to proceed with auto-population")
+        
+#         # Show example usage
+#         with st.expander("📋 How to Use This App"):
+#             st.markdown("""
+#             **Step 1: Excel Configuration**
+#             1. Upload your Excel file
+#             2. Select the sheets you want to work with
+#             3. Create text sequences by selecting individual cells (these will populate {{TEXT1}}, {{TEXT2}}, etc.)
+#             4. Create table sequences by selecting columns and rows (these will populate {{TABLE1}}, {{TABLE2}}, etc.)
+#             5. Use the up/down arrows to reorder sequences
+            
+#             **Step 2: PowerPoint Template**
+#             1. Upload your PowerPoint template with placeholders
+#             2. The app will automatically map your Excel data to placeholders in sequence
+#             3. Fill in any remaining placeholders manually
+#             4. Generate and download your populated presentation
+            
+#             **PowerPoint Placeholder Format:**
+#             - Text: `{{TEXT1}}`, `{{TEXT2}}`, `{{TITLE}}`, etc.
+#             - Tables: `{{TABLE1}}`, `{{TABLE2}}`, etc.
+#             - Images: `{{IMAGE1}}`, `{{IMAGE2}}`, etc.
+            
+#             **Tips:**
+#             - Text sequences populate in order: first sequence → {{TEXT1}}, second → {{TEXT2}}, etc.
+#             - Table sequences populate in order: first table → {{TABLE1}}, second → {{TABLE2}}, etc.
+#             - You can reorder sequences using the arrow buttons
+#             - Manual inputs are available for any remaining placeholders
+#             """)
+
+# if __name__ == "__main__":
+#     main()
+
+
+
+
+
+
+
+import streamlit as st
+import pandas as pd
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
+from pptx.dml.color import RGBColor
+import io
+import re
+from PIL import Image
+import tempfile
+import os
+
+def detect_placeholders(prs):
+    """Detect all placeholders in the PowerPoint presentation with set support"""
+    placeholders = {
+        'text': {},  # Changed to dict to organize by sets
+        'image': {},
+        'table': {}
+    }
+    
+    # Updated regex pattern to capture set prefixes
+    pattern = r'\{\{((?:SET\d+_)?[^}]+)\}\}'
+    
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            # Check text in shapes
+            if hasattr(shape, "text") and shape.text:
+                matches = re.findall(pattern, shape.text)
+                for match in matches:
+                    placeholder = match.upper().strip()
+                    
+                    # Parse set and type
+                    if placeholder.startswith('SET') and '_' in placeholder:
+                        parts = placeholder.split('_', 1)
+                        set_name = parts[0]
+                        type_part = parts[1]
+                    else:
+                        set_name = 'DEFAULT'
+                        type_part = placeholder
+                    
+                    # Categorize placeholder
+                    if type_part.startswith('IMAGE'):
+                        if set_name not in placeholders['image']:
+                            placeholders['image'][set_name] = set()
+                        placeholders['image'][set_name].add(placeholder)
+                    elif type_part.startswith('TABLE'):
+                        if set_name not in placeholders['table']:
+                            placeholders['table'][set_name] = set()
+                        placeholders['table'][set_name].add(placeholder)
+                    else:
+                        if set_name not in placeholders['text']:
+                            placeholders['text'][set_name] = set()
+                        placeholders['text'][set_name].add(placeholder)
+            
+            # Check text in table cells
+            if shape.has_table:
+                table = shape.table
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text:
+                            matches = re.findall(pattern, cell.text)
+                            for match in matches:
+                                placeholder = match.upper().strip()
+                                
+                                # Parse set and type
+                                if placeholder.startswith('SET') and '_' in placeholder:
+                                    parts = placeholder.split('_', 1)
+                                    set_name = parts[0]
+                                    type_part = parts[1]
+                                else:
+                                    set_name = 'DEFAULT'
+                                    type_part = placeholder
+                                
+                                # Categorize placeholder
+                                if type_part.startswith('IMAGE'):
+                                    if set_name not in placeholders['image']:
+                                        placeholders['image'][set_name] = set()
+                                    placeholders['image'][set_name].add(placeholder)
+                                elif type_part.startswith('TABLE'):
+                                    if set_name not in placeholders['table']:
+                                        placeholders['table'][set_name] = set()
+                                    placeholders['table'][set_name].add(placeholder)
+                                else:
+                                    if set_name not in placeholders['text']:
+                                        placeholders['text'][set_name] = set()
+                                    placeholders['text'][set_name].add(placeholder)
+    
+    return placeholders
+
+def replace_text_in_slides(prs, replacements):
+    """Replace placeholder text in all slides"""
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                for placeholder, replacement in replacements.items():
+                    if placeholder in shape.text:
+                        shape.text = shape.text.replace(placeholder, str(replacement))
+            
+            # Handle text in tables
+            if shape.has_table:
+                table = shape.table
+                for row in table.rows:
+                    for cell in row.cells:
+                        for placeholder, replacement in replacements.items():
+                            if placeholder in cell.text:
+                                cell.text = cell.text.replace(placeholder, str(replacement))
+
+def add_image_to_slide(slide, image_file, placeholder_text, width=Inches(4), height=Inches(3)):
+    """Add image to slide, replacing placeholder or adding new"""
+    # Reset file pointer and read data
+    image_file.seek(0)
+    image_data = image_file.read()
+    
+    # Save uploaded image to temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+        tmp_file.write(image_data)
+        tmp_path = tmp_file.name
+    
+    try:
+        # Look for placeholder text in shapes
+        placeholder_found = False
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and placeholder_text in shape.text:
+                # Get position and size of placeholder
+                left = shape.left
+                top = shape.top
+                width = shape.width
+                height = shape.height
+                
+                # Remove placeholder shape
+                shape.element.getparent().remove(shape.element)
+                
+                # Add image at same position
+                slide.shapes.add_picture(tmp_path, left, top, width, height)
+                placeholder_found = True
+                break
+        
+        # If no placeholder found, add image at default position
+        if not placeholder_found:
+            slide.shapes.add_picture(tmp_path, Inches(1), Inches(1), width, height)
+            
+    finally:
+        # Clean up temporary file
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+def add_table_to_slide(slide, df, placeholder_text):
+    """Add DataFrame as table to slide"""
+    # Look for placeholder
+    placeholder_shape = None
+    for shape in slide.shapes:
+        if hasattr(shape, "text") and placeholder_text in shape.text:
+            placeholder_shape = shape
+            break
+    
+    if placeholder_shape:
+        # Get position of placeholder
+        left = placeholder_shape.left
+        top = placeholder_shape.top
+        width = placeholder_shape.width
+        
+        # Remove placeholder
+        placeholder_shape.element.getparent().remove(placeholder_shape.element)
+    else:
+        # Default position
+        left = Inches(1)
+        top = Inches(4)
+        width = Inches(8)
+    
+    # Create table
+    rows, cols = df.shape[0] + 1, df.shape[1]  # +1 for header
+    table_shape = slide.shapes.add_table(rows, cols, left, top, width, Inches(0.5 * rows))
+    table = table_shape.table
+    
+    # Add headers
+    for i, col_name in enumerate(df.columns):
+        cell = table.cell(0, i)
+        cell.text = str(col_name)
+        # Make header bold
+        for paragraph in cell.text_frame.paragraphs:
+            for run in paragraph.runs:
+                run.font.bold = True
+    
+    # Add data
+    for i, row in df.iterrows():
+        for j, value in enumerate(row):
+            cell = table.cell(i + 1, j)
+            cell.text = str(value)
+
+def main():
+    st.set_page_config(
+        page_title="Excel to PowerPoint Template Filler",
+        page_icon="📊",
+        layout="wide"
+    )
+    
+    st.title("📊 Excel to PowerPoint Template Filler")
+    st.markdown("""
+    **Transform your Excel data into PowerPoint presentations automatically!**
+    
+    This app lets you:
+    - 📊 Upload Excel files and select specific data
+    - 🎯 Create automated sequences for text and tables organized by sets
+    - 📄 Upload PowerPoint templates with set-based placeholders
+    - 🚀 Generate populated presentations instantly
+    
+    **New: Multiple Set Support!**
+    - Use `{{SET1_TEXT1}}`, `{{SET1_TEXT2}}` for first set
+    - Use `{{SET2_TEXT1}}`, `{{SET2_TEXT2}}` for second set, etc.
+    - Same applies to tables: `{{SET1_TABLE1}}`, `{{SET2_TABLE1}}`
+    - And images: `{{SET1_IMAGE1}}`, `{{SET2_IMAGE1}}`
+    """)
+    
+    # Initialize session state with set support
+    if 'excel_data' not in st.session_state:
+        st.session_state.excel_data = {}
+    if 'text_sequences' not in st.session_state:
+        st.session_state.text_sequences = {}  # Changed to dict organized by sets
+    if 'table_sequences' not in st.session_state:
+        st.session_state.table_sequences = {}  # Changed to dict organized by sets
+    
+    # Step 1: Excel File Upload and Configuration
+    st.header("📋 Step 1: Upload & Configure Excel Data")
+    
+    # Prominent call-to-action for Excel upload
+    st.markdown("### 🔥 Start Here: Upload Your Excel File")
+    st.markdown("*Upload your Excel file to unlock automatic data population features*")
+    
+    uploaded_excel = st.file_uploader(
+        "Choose Excel File (.xlsx, .xls)",
+        type=['xlsx', 'xls'],
+        help="Upload an Excel file to extract data for PowerPoint placeholders",
+        key="excel_uploader"
+    )
+    
+    if uploaded_excel is not None:
+        try:
+            # Load Excel file
+            excel_file = pd.ExcelFile(uploaded_excel)
+            sheet_names = excel_file.sheet_names
+            
+            st.success(f"🎉 **Excel file loaded successfully!**")
+            st.info(f"📊 Found **{len(sheet_names)} sheets**: {', '.join(sheet_names)}")
+            
+            # Sheet selection with better visibility
+            st.markdown("### 📑 Select Sheets to Work With")
+            selected_sheets = st.multiselect(
+                "Choose which sheets contain the data you want to use:",
+                sheet_names,
+                default=sheet_names[:3] if len(sheet_names) >= 3 else sheet_names,
+                help="Select one or more sheets that contain your data"
+            )
+            
+            if selected_sheets:
+                # Load data from selected sheets
+                for sheet_name in selected_sheets:
+                    if sheet_name not in st.session_state.excel_data:
+                        st.session_state.excel_data[sheet_name] = pd.read_excel(uploaded_excel, sheet_name=sheet_name)
+                
+                # Data configuration interface
+                st.subheader("🔧 Configure Data Sequences by Sets")
+                st.markdown("Create sequences organized by sets that will automatically populate your PowerPoint placeholders")
+                
+                tab1, tab2 = st.tabs(["📝 Text Sequences", "📊 Table Sequences"])
+                
+                with tab1:
+                    st.markdown("**Text sequences will populate text placeholders ({{SET1_TEXT1}}, {{SET1_TEXT2}}, etc.) in order within each set**")
+                    
+                    # Set selection for text
+                    st.markdown("#### Select Set for Text Sequences")
+                    selected_text_set = st.selectbox(
+                        "Choose or create a set:",
+                        options=["SET1", "SET2", "SET3", "SET4", "SET5"] + list(st.session_state.text_sequences.keys()),
+                        key="selected_text_set",
+                        help="Select which set this sequence belongs to"
+                    )
+                    
+                    # Initialize set if not exists
+                    if selected_text_set not in st.session_state.text_sequences:
+                        st.session_state.text_sequences[selected_text_set] = []
+                    
+                    # Add new text sequence
+                    with st.expander(f"➕ Add New Text Sequence to {selected_text_set}"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            text_sheet = st.selectbox("Select Sheet", selected_sheets, key="text_sheet")
+                        with col2:
+                            if text_sheet:
+                                available_columns = list(st.session_state.excel_data[text_sheet].columns)
+                                text_column = st.selectbox("Select Column", available_columns, key="text_column")
+                        with col3:
+                            text_row = st.number_input("Row Index (0-based)", min_value=0, 
+                                                     max_value=len(st.session_state.excel_data[text_sheet])-1 if text_sheet else 0,
+                                                     value=0, key="text_row")
+                        
+                        if st.button(f"Add Text Sequence to {selected_text_set}", key="add_text"):
+                            if text_sheet and text_column:
+                                value = st.session_state.excel_data[text_sheet].iloc[text_row][text_column]
+                                sequence_info = {
+                                    'sheet': text_sheet,
+                                    'column': text_column,
+                                    'row': text_row,
+                                    'value': str(value),
+                                    'description': f"{text_sheet} - {text_column} [Row {text_row}]"
+                                }
+                                st.session_state.text_sequences[selected_text_set].append(sequence_info)
+                                st.success(f"Added text sequence to {selected_text_set}: {sequence_info['description']}")
+                                st.rerun()
+                    
+                    # Display and manage existing text sequences by set
+                    for set_name, sequences in st.session_state.text_sequences.items():
+                        if sequences:
+                            st.markdown(f"**{set_name} Text Sequences:**")
+                            for i, seq in enumerate(sequences):
+                                col1, col2, col3 = st.columns([3, 1, 1])
+                                with col1:
+                                    st.write(f"**{{{{{set_name}_TEXT{i+1}}}}}** ← {seq['description']}: `{seq['value'][:50]}{'...' if len(seq['value']) > 50 else ''}`")
+                                with col2:
+                                    if st.button("↑", key=f"up_text_{set_name}_{i}", disabled=i==0):
+                                        st.session_state.text_sequences[set_name][i], st.session_state.text_sequences[set_name][i-1] = st.session_state.text_sequences[set_name][i-1], st.session_state.text_sequences[set_name][i]
+                                        st.rerun()
+                                with col3:
+                                    if st.button("🗑️", key=f"del_text_{set_name}_{i}"):
+                                        st.session_state.text_sequences[set_name].pop(i)
+                                        st.rerun()
+                
+                with tab2:
+                    st.markdown("**Table sequences will populate table placeholders ({{SET1_TABLE1}}, {{SET1_TABLE2}}, etc.) in order within each set**")
+                    
+                    # Set selection for tables
+                    st.markdown("#### Select Set for Table Sequences")
+                    selected_table_set = st.selectbox(
+                        "Choose or create a set:",
+                        options=["SET1", "SET2", "SET3", "SET4", "SET5"] + list(st.session_state.table_sequences.keys()),
+                        key="selected_table_set",
+                        help="Select which set this sequence belongs to"
+                    )
+                    
+                    # Initialize set if not exists
+                    if selected_table_set not in st.session_state.table_sequences:
+                        st.session_state.table_sequences[selected_table_set] = []
+                    
+                    # Add new table sequence
+                    with st.expander(f"➕ Add New Table Sequence to {selected_table_set}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            table_sheet = st.selectbox("Select Sheet", selected_sheets, key="table_sheet")
+                        with col2:
+                            if table_sheet:
+                                available_columns = list(st.session_state.excel_data[table_sheet].columns)
+                                table_columns = st.multiselect(
+                                    "Select Columns", 
+                                    available_columns, 
+                                    key="table_columns",
+                                    help="Select multiple columns to create a table"
+                                )
+                        
+                        table_rows = st.slider(
+                            "Number of rows to include", 
+                            min_value=1, 
+                            max_value=len(st.session_state.excel_data[table_sheet]) if table_sheet else 10,
+                            value=min(10, len(st.session_state.excel_data[table_sheet]) if table_sheet else 10),
+                            key="table_rows"
+                        )
+                        
+                        if st.button(f"Add Table Sequence to {selected_table_set}", key="add_table"):
+                            if table_sheet and table_columns:
+                                df_subset = st.session_state.excel_data[table_sheet][table_columns].head(table_rows)
+                                sequence_info = {
+                                    'sheet': table_sheet,
+                                    'columns': table_columns,
+                                    'rows': table_rows,
+                                    'data': df_subset,
+                                    'description': f"{table_sheet} - {', '.join(table_columns)} ({table_rows} rows)"
+                                }
+                                st.session_state.table_sequences[selected_table_set].append(sequence_info)
+                                st.success(f"Added table sequence to {selected_table_set}: {sequence_info['description']}")
+                                st.rerun()
+                    
+                    # Display and manage existing table sequences by set
+                    for set_name, sequences in st.session_state.table_sequences.items():
+                        if sequences:
+                            st.markdown(f"**{set_name} Table Sequences:**")
+                            for i, seq in enumerate(sequences):
+                                with st.expander(f"**{{{{{set_name}_TABLE{i+1}}}}}** ← {seq['description']}"):
+                                    col1, col2 = st.columns([4, 1])
+                                    with col1:
+                                        st.dataframe(seq['data'], use_container_width=True)
+                                    with col2:
+                                        if st.button("↑", key=f"up_table_{set_name}_{i}", disabled=i==0):
+                                            st.session_state.table_sequences[set_name][i], st.session_state.table_sequences[set_name][i-1] = st.session_state.table_sequences[set_name][i-1], st.session_state.table_sequences[set_name][i]
+                                            st.rerun()
+                                        if st.button("🗑️", key=f"del_table_{set_name}_{i}"):
+                                            st.session_state.table_sequences[set_name].pop(i)
+                                            st.rerun()
+        
+        except Exception as e:
+            st.error(f"❌ Error loading Excel file: {str(e)}")
+            st.error("Please make sure you uploaded a valid Excel file (.xlsx or .xls)")
+    
+    else:
+        # Show prominent message when no Excel file is uploaded
+        st.warning("⬆️ **Please upload an Excel file above to enable auto-population features**")
+        
+        with st.expander("💡 What happens when you upload Excel?", expanded=True):
+            st.markdown("""
+            **When you upload an Excel file, you'll be able to:**
+            - 📊 **View all sheets** in your Excel file
+            - 🎯 **Create text sequences** organized by sets (populates {{SET1_TEXT1}}, {{SET2_TEXT1}}, etc.)
+            - 📋 **Create table sequences** organized by sets (populates {{SET1_TABLE1}}, {{SET2_TABLE1}}, etc.)
+            - 🔄 **Reorder sequences** within each set to control the mapping
+            - 🚀 **Auto-populate** your PowerPoint templates instantly
+            
+            **Without Excel:** You can still use manual input mode below ⬇️
+            """)
+        
+        st.markdown("---")
+    
+    # Step 2: PowerPoint Template Processing
+    st.header("📄 Step 2: PowerPoint Template Processing")
+    st.markdown("**Upload your PowerPoint template to populate with Excel data or manual inputs**")
+    
+    uploaded_ppt = st.file_uploader(
+        "📁 Upload PowerPoint Template (.pptx)",
+        type=['pptx'],
+        help="Upload a PowerPoint file with set-based placeholder text like {{SET1_TEXT1}}, {{SET1_IMAGE1}}, {{SET1_TABLE1}}",
+        key="ppt_uploader"
+    )
+    
+    if uploaded_ppt is not None:
+        try:
+            # Load and analyze the PowerPoint file
+            prs = Presentation(uploaded_ppt)
+            placeholders = detect_placeholders(prs)
+            
+            # Count total placeholders
+            total_text = sum(len(placeholders_set) for placeholders_set in placeholders['text'].values())
+            total_image = sum(len(placeholders_set) for placeholders_set in placeholders['image'].values())
+            total_table = sum(len(placeholders_set) for placeholders_set in placeholders['table'].values())
+            
+            st.success(f"✅ Template loaded! Found {total_text} text, {total_image} image, and {total_table} table placeholders across multiple sets.")
+            
+            # Show detected placeholders organized by set
+            with st.expander("🔍 Detected Placeholders by Set"):
+                for placeholder_type in ['text', 'image', 'table']:
+                    if placeholders[placeholder_type]:
+                        st.write(f"**{placeholder_type.title()} Placeholders:**")
+                        for set_name, placeholder_set in placeholders[placeholder_type].items():
+                            if placeholder_set:
+                                st.write(f"  *{set_name}:*")
+                                for placeholder in sorted(placeholder_set):
+                                    st.write(f"    • {{{{{placeholder}}}}}")
+            
+            # Show mapping preview
+            has_sequences = any(st.session_state.text_sequences.values()) or any(st.session_state.table_sequences.values())
+            if has_sequences:
+                st.success("🎯 **Auto-population is ACTIVE!** Your Excel data will automatically fill placeholders.")
+                with st.expander("🔗 Auto-Population Mapping Preview", expanded=True):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Text Mapping:**")
+                        for set_name, sequences in st.session_state.text_sequences.items():
+                            if sequences:
+                                st.write(f"*{set_name}:*")
+                                for i, seq in enumerate(sequences):
+                                    placeholder_name = f"{set_name}_TEXT{i+1}"
+                                    found_in_ppt = any(placeholder_name in placeholder_set for placeholder_set in placeholders['text'].values())
+                                    status = "✅" if found_in_ppt else "⚠️"
+                                    st.write(f"  {status} {{{{{placeholder_name}}}}} ← {seq['description']}")
+                    
+                    with col2:
+                        st.write("**Table Mapping:**")
+                        for set_name, sequences in st.session_state.table_sequences.items():
+                            if sequences:
+                                st.write(f"*{set_name}:*")
+                                for i, seq in enumerate(sequences):
+                                    placeholder_name = f"{set_name}_TABLE{i+1}"
+                                    found_in_ppt = any(placeholder_name in placeholder_set for placeholder_set in placeholders['table'].values())
+                                    status = "✅" if found_in_ppt else "⚠️"
+                                    st.write(f"  {status} {{{{{placeholder_name}}}}} ← {seq['description']}")
+            
+            # Manual inputs for remaining placeholders
+            st.subheader("✍️ Manual Inputs for Remaining Placeholders")
+            
+            # Get all configured placeholders to determine what's remaining
+            configured_text_placeholders = set()
+            for set_name, sequences in st.session_state.text_sequences.items():
+                for i in range(len(sequences)):
+                    configured_text_placeholders.add(f"{set_name}_TEXT{i+1}")
+            
+            configured_table_placeholders = set()
+            for set_name, sequences in st.session_state.table_sequences.items():
+                for i in range(len(sequences)):
+                    configured_table_placeholders.add(f"{set_name}_TABLE{i+1}")
+            
+            # Find remaining placeholders
+            all_text_placeholders = set()
+            for placeholder_set in placeholders['text'].values():
+                all_text_placeholders.update(placeholder_set)
+            
+            all_table_placeholders = set()
+            for placeholder_set in placeholders['table'].values():
+                all_table_placeholders.update(placeholder_set)
+            
+            all_image_placeholders = set()
+            for placeholder_set in placeholders['image'].values():
+                all_image_placeholders.update(placeholder_set)
+            
+            remaining_text_placeholders = all_text_placeholders - configured_text_placeholders
+            remaining_table_placeholders = all_table_placeholders - configured_table_placeholders
+            
+            if remaining_text_placeholders or remaining_table_placeholders or all_image_placeholders:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Remaining text inputs
+                    if remaining_text_placeholders:
+                        st.write("**Additional Text Inputs:**")
+                        manual_text_inputs = {}
+                        for placeholder in sorted(remaining_text_placeholders):
+                            placeholder_key = f"{{{{{placeholder}}}}}"
+                            manual_text_inputs[placeholder_key] = st.text_area(
+                                f"{placeholder} (replaces {placeholder_key})",
+                                height=80,
+                                key=f"manual_text_{placeholder}"
+                            )
+                    
+                    # Image inputs (all images are manual for now)
+                    if all_image_placeholders:
+                        st.write("**Image Uploads:**")
+                        uploaded_images = {}
+                        for placeholder in sorted(all_image_placeholders):
+                            placeholder_key = f"{{{{{placeholder}}}}}"
+                            uploaded_images[placeholder] = st.file_uploader(
+                                f"{placeholder} (replaces {placeholder_key})",
+                                type=['png', 'jpg', 'jpeg'],
+                                key=f"image_{placeholder}"
+                            )
+                            
+                            if uploaded_images[placeholder] is not None:
+                                img = Image.open(uploaded_images[placeholder])
+                                st.image(img, caption=f"Preview of {placeholder}", width=200)
+                
+                with col2:
+                    # Remaining table inputs
+                    if remaining_table_placeholders:
+                        st.write("**Additional Table Inputs:**")
+                        manual_tables_data = {}
+                        for placeholder in sorted(remaining_table_placeholders):
+                            placeholder_key = f"{{{{{placeholder}}}}}"
+                            st.write(f"**{placeholder} (replaces {placeholder_key})**")
+                            
+                            # Default sample data
+                            if f"manual_df_{placeholder}" not in st.session_state:
+                                st.session_state[f"manual_df_{placeholder}"] = pd.DataFrame({
+                                    'Column 1': ['Row 1', 'Row 2', 'Row 3'],
+                                    'Column 2': [100, 200, 300]
+                                })
+                            
+                            manual_tables_data[placeholder] = st.data_editor(
+                                st.session_state[f"manual_df_{placeholder}"],
+                                key=f"manual_table_{placeholder}",
+                                num_rows="dynamic",
+                                use_container_width=True
+                            )
+            
+            # Generate PowerPoint button
+            generation_label = "🚀 Generate PowerPoint with Set-Based Auto-Population" if has_sequences else "🚀 Generate PowerPoint (Manual Mode)"
+            
+            if st.button(generation_label, type="primary", use_container_width=True):
+                try:
+                    # Reload the PowerPoint file
+                    prs = Presentation(uploaded_ppt)
+                    
+                    # Auto-populate text placeholders from sequences
+                    text_replacements = {}
+                    for set_name, sequences in st.session_state.text_sequences.items():
+                        for i, seq in enumerate(sequences):
+                            placeholder_key = f"{{{{{set_name}_TEXT{i+1}}}}}"
+                            text_replacements[placeholder_key] = seq['value']
+                    
+                    # Add manual text inputs
+                    if remaining_text_placeholders:
+                        for placeholder in remaining_text_placeholders:
+                            placeholder_key = f"{{{{{placeholder}}}}}"
+                            if placeholder_key in manual_text_inputs and manual_text_inputs[placeholder_key].strip():
+                                text_replacements[placeholder_key] = manual_text_inputs[placeholder_key]
+                    
+                    # Replace text placeholders
+                    if text_replacements:
+                        replace_text_in_slides(prs, text_replacements)
+                        st.success(f"✅ Replaced {len(text_replacements)} text placeholders")
+                    
+                    # Auto-populate table placeholders from sequences
+                    table_count = 0
+                    for set_name, sequences in st.session_state.table_sequences.items():
+                        for i, seq in enumerate(sequences):
+                            placeholder_key = f"{{{{{set_name}_TABLE{i+1}}}}}"
+                            # Find which slide contains this placeholder
+                            for slide in prs.slides:
+                                for shape in slide.shapes:
+                                    if hasattr(shape, "text") and placeholder_key in shape.text:
+                                        add_table_to_slide(slide, seq['data'], placeholder_key)
+                                        table_count += 1
+                                        break
+                    
+                    # Add manual tables
+                    if remaining_table_placeholders:
+                        for placeholder in remaining_table_placeholders:
+                            if placeholder in manual_tables_data and not manual_tables_data[placeholder].empty:
+                                placeholder_key = f"{{{{{placeholder}}}}}"
+                                for slide in prs.slides:
+                                    for shape in slide.shapes:
+                                        if hasattr(shape, "text") and placeholder_key in shape.text:
+                                            add_table_to_slide(slide, manual_tables_data[placeholder], placeholder_key)
+                                            table_count += 1
+                                            break
+                    
+                    if table_count > 0:
+                        st.success(f"✅ Added {table_count} tables")
+                    
+                    # Add images
+                    if all_image_placeholders:
+                        image_count = 0
+                        for placeholder in all_image_placeholders:
+                            if uploaded_images[placeholder] is not None:
+                                placeholder_key = f"{{{{{placeholder}}}}}"
+                                for slide in prs.slides:
+                                    for shape in slide.shapes:
+                                        if hasattr(shape, "text") and placeholder_key in shape.text:
+                                            add_image_to_slide(slide, uploaded_images[placeholder], placeholder_key)
+                                            image_count += 1
+                                            break
+                        
+                        if image_count > 0:
+                            st.success(f"✅ Added {image_count} images")
+                    
+                    # Save the modified presentation
+                    output = io.BytesIO()
+                    prs.save(output)
+                    output.seek(0)
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Set-Based Auto-Populated PowerPoint",
+                        data=output,
+                        file_name="set_based_auto_populated_presentation.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        use_container_width=True
+                    )
+                    
+                    st.success("🎉 PowerPoint generated successfully with set-based auto-population!")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error processing PowerPoint: {str(e)}")
+                    st.error("Make sure your PowerPoint file is valid and contains the expected placeholders.")
+        
+        except Exception as e:
+            st.error(f"❌ Error loading PowerPoint: {str(e)}")
+            st.error("Please make sure you uploaded a valid .pptx file.")
+    
+    else:
+        st.info("👆 Please upload a PowerPoint template to proceed with set-based auto-population")
+        
+        # Show example usage
+        with st.expander("📋 How to Use This App with Sets"):
+            st.markdown("""
+            **Step 1: Excel Configuration**
+            1. Upload your Excel file
+            2. Select the sheets you want to work with
+            3. Choose a set (SET1, SET2, etc.) for organizing your sequences
+            4. Create text sequences by selecting individual cells (these will populate {{SET1_TEXT1}}, {{SET1_TEXT2}}, etc.)
+            5. Create table sequences by selecting columns and rows (these will populate {{SET1_TABLE1}}, {{SET1_TABLE2}}, etc.)
+            6. Use the up/down arrows to reorder sequences within each set
+            
+            **Step 2: PowerPoint Template**
+            1. Upload your PowerPoint template with set-based placeholders
+            2. The app will automatically map your Excel data to placeholders by set and sequence
+            3. Fill in any remaining placeholders manually
+            4. Generate and download your populated presentation
+            
+            **PowerPoint Placeholder Format with Sets:**
+            - Text: `{{SET1_TEXT1}}`, `{{SET1_TEXT2}}`, `{{SET2_TEXT1}}`, etc.
+            - Tables: `{{SET1_TABLE1}}`, `{{SET1_TABLE2}}`, `{{SET2_TABLE1}}`, etc.
+            - Images: `{{SET1_IMAGE1}}`, `{{SET1_IMAGE2}}`, `{{SET2_IMAGE1}}`, etc.
+            - Legacy format still works: `{{TEXT1}}`, `{{TABLE1}}`, `{{IMAGE1}}` (treated as DEFAULT set)
+            
+            **Tips:**
+            - Different sets allow you to organize data for different slides or sections
+            - Within each set, sequences populate in order: first sequence → TEXT1, second → TEXT2, etc.
+            - You can have multiple sets with different data sources
+            - Manual inputs are available for any remaining placeholders
+            
+            **Example Use Cases:**
+            - **SET1**: Summary data for executive slide
+            - **SET2**: Detailed metrics for analysis slide  
+            - **SET3**: Regional data for geographic breakdown
+            """)
+
+if __name__ == "__main__":
+    main()
